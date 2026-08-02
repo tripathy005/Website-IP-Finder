@@ -1,0 +1,6 @@
+{
+  "name": "Website IP Finder",
+  "description": "Find the IP address, DNS records, ISP details, hosting location, and WHOIS information of any website instantly.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
