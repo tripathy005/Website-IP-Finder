@@ -36,8 +36,8 @@ export const Footer: React.FC = () => {
 
         {/* Right status */}
         <div className="text-right text-[11px] text-slate-500">
-          <div>Built with React & Express • Ultra-Low Latency</div>
-        </div>
+          <div>Built with React & Express • Ultra-Low Latency • devloped by @tripathy05 </div>
+        </div> 
       </div>
     </footer>
   );
