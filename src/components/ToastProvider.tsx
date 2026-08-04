@@ -32,7 +32,11 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ toasts, onDismiss 
               {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />}
               {toast.type === 'info' && <Info className="w-5 h-5 text-cyan-400 shrink-0" />}
               <span className="text-xs sm:text-sm font-sans font-medium tracking-wide">
-                {toast.message}
+                {typeof toast.message === 'string'
+                  ? toast.message
+                  : typeof toast.message === 'object'
+                  ? (toast.message as any)?.message || JSON.stringify(toast.message)
+                  : String(toast.message)}
               </span>
             </div>
             <button

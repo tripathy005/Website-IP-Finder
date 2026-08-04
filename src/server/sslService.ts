@@ -1,7 +1,7 @@
 import tls from 'tls';
 import https from 'https';
 import http from 'http';
-import { PeerCertificate } from 'tls';
+import type { PeerCertificate } from 'tls';
 
 export interface SslInfo {
   valid: boolean;

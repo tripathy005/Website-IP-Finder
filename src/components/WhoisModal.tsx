@@ -36,7 +36,18 @@ export const WhoisModal: React.FC<WhoisModalProps> = ({
       const resp = await axios.get(`/api/whois/${encodeURIComponent(domainName)}`);
       setWhoisData(resp.data);
     } catch (err: any) {
-      setError(err.response?.data?.error || err.message || 'Failed to fetch WHOIS information.');
+      const respErr = err.response?.data?.error;
+      let msg = 'Failed to fetch WHOIS information.';
+
+      if (typeof respErr === 'string') {
+        msg = respErr;
+      } else if (respErr && typeof respErr === 'object') {
+        msg = typeof respErr.message === 'string' ? respErr.message : JSON.stringify(respErr);
+      } else if (typeof err.message === 'string') {
+        msg = err.message;
+      }
+
+      setError(msg);
     } finally {
       setLoading(false);
     }

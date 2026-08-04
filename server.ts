@@ -2,11 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { normalizeDomain } from './src/server/domainUtils.js';
-import { resolveDnsRecords } from './src/server/dnsService.js';
-import { getIpGeoDetails } from './src/server/ipService.js';
-import { inspectNetworkAndSsl } from './src/server/sslService.js';
-import { getWhoisInfo } from './src/server/whoisService.js';
+import { normalizeDomain } from './src/server/domainUtils.ts';
+import { resolveDnsRecords } from './src/server/dnsService.ts';
+import { getIpGeoDetails } from './src/server/ipService.ts';
+import { inspectNetworkAndSsl } from './src/server/sslService.ts';
+import { getWhoisInfo } from './src/server/whoisService.ts';
 
 async function startServer() {
   const app = express();

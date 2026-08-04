@@ -87,10 +87,19 @@ export default function App() {
       saveHistory(updatedHistory);
       addToast('success', `Resolved IP address for ${data.domainInfo.domain}`);
     } catch (err: any) {
-      const msg =
-        err.response?.data?.error ||
-        err.message ||
-        'Unable to resolve domain. Please check the website URL and try again.';
+      const respErr = err.response?.data?.error;
+      let msg = 'Unable to resolve domain. Please check the website URL and try again.';
+
+      if (typeof respErr === 'string') {
+        msg = respErr;
+      } else if (respErr && typeof respErr === 'object') {
+        msg = typeof respErr.message === 'string' ? respErr.message : JSON.stringify(respErr);
+      } else if (typeof err.message === 'string') {
+        msg = err.message;
+      } else if (err && typeof err === 'object') {
+        msg = JSON.stringify(err);
+      }
+
       setErrorMessage(msg);
       addToast('error', msg);
     } finally {
