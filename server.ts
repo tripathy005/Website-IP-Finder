@@ -15,11 +15,11 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
-  // API 1: Primary Comprehensive Lookup Endpoint
-  app.post('/api/lookup', async (req, res) => {
+  // API 1: Primary Comprehensive Lookup Endpoint (Supports POST & GET)
+  const handleLookup = async (req: express.Request, res: express.Response) => {
     try {
-      const { input } = req.body || {};
-      if (!input) {
+      const input = req.body?.input || req.query?.input || req.query?.domain || req.query?.q;
+      if (!input || typeof input !== 'string') {
         return res.status(400).json({ error: 'Please provide a domain or URL.' });
       }
 
@@ -95,9 +95,12 @@ async function startServer() {
       return res.json(responsePayload);
     } catch (err: any) {
       console.error('Lookup Error:', err);
-      return res.status(500).json({ error: err.message || 'Failed to complete DNS and IP resolution.' });
+      return res.status(500).json({ error: String(err?.message || 'Failed to complete DNS and IP resolution.') });
     }
-  });
+  };
+
+  app.post('/api/lookup', handleLookup);
+  app.get('/api/lookup', handleLookup);
 
   // API 2: WHOIS Lookup Endpoint
   app.get('/api/whois/:domain', async (req, res) => {
@@ -111,7 +114,7 @@ async function startServer() {
       const whoisData = await getWhoisInfo(normalized.domain);
       return res.json(whoisData);
     } catch (err: any) {
-      return res.status(500).json({ error: err.message || 'WHOIS request failed.' });
+      return res.status(500).json({ error: String(err?.message || 'WHOIS request failed.') });
     }
   });
 
@@ -127,8 +130,13 @@ async function startServer() {
       const health = await inspectNetworkAndSsl(normalized.domain);
       return res.json({ domain: normalized.domain, health });
     } catch (err: any) {
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({ error: String(err?.message || 'Ping failed') });
     }
+  });
+
+  // API Catch-All 404 Handler (Prevents returning HTML index.html for invalid /api/ routes)
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: `API endpoint '${req.originalUrl}' not found.` });
   });
 
   // Serve Frontend via Vite Middleware or Production Static Files

@@ -117,7 +117,11 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
         {/* Local Error or Props Error */}
         {(localError || errorMessage) && (
           <div className="mt-3 text-sm text-rose-400 bg-rose-950/50 border border-rose-800/60 rounded-lg p-2.5 text-center font-mono animate-fadeIn">
-            ⚠️ {localError || errorMessage}
+            ⚠️ {typeof (localError || errorMessage) === 'string'
+              ? (localError || errorMessage)
+              : typeof (localError || errorMessage) === 'object'
+              ? ((localError || errorMessage) as any)?.message || JSON.stringify(localError || errorMessage)
+              : String(localError || errorMessage)}
           </div>
         )}
       </form>
