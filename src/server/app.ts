@@ -9,21 +9,26 @@ import { getWhoisInfo } from './whoisService';
 const app = express();
 
 app.use(cors());
-app.use(express.json());
 
-// Middleware to handle raw string bodies or serverless body issues gracefully
-app.use((req: express.Request, _res: express.Response, next: express.NextFunction) => {
-  if (typeof req.body === 'string' && req.body.trim()) {
-    try {
-      req.body = JSON.parse(req.body);
-    } catch {
-      // Keep as string if parsing fails
+// Handle pre-parsed body (Vercel Serverless environment) vs standard Express body parsing
+app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // If req.body was already parsed into an object or string by Vercel Serverless, skip express.json()
+  if (req.body && (typeof req.body === 'object' || typeof req.body === 'string')) {
+    if (typeof req.body === 'string' && req.body.trim()) {
+      try {
+        req.body = JSON.parse(req.body);
+      } catch {
+        // Keep raw string if JSON parsing fails
+      }
     }
+    return next();
   }
-  next();
+
+  // Standard Express stream body parser for local / Cloud Run server execution
+  express.json({ limit: '1mb' })(req, res, next);
 });
 
-// Primary Comprehensive Lookup Endpoint
+// Primary Comprehensive Lookup Endpoint Handler
 const handleLookup = async (req: express.Request, res: express.Response) => {
   try {
     let input = req.body?.input || req.query?.input || req.query?.domain || req.query?.q;
@@ -153,7 +158,7 @@ const handleLookup = async (req: express.Request, res: express.Response) => {
 };
 
 app.post(['/api/lookup', '/lookup', '/api', '/'], handleLookup);
-app.get(['/api/lookup', '/lookup', '/api'], handleLookup);
+app.get(['/api/lookup', '/lookup', '/api', '/'], handleLookup);
 
 // WHOIS Lookup Endpoint
 app.get(['/api/whois/:domain', '/whois/:domain', '/:domain'], async (req, res) => {
@@ -199,7 +204,7 @@ app.get(['/api/ping/:domain', '/ping/:domain'], async (req, res) => {
   }
 });
 
-// Global Express Error Handler Middleware for Serverless Failures
+// Global Express Error Handler Middleware
 app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Global Express Error:', err);
   if (res.headersSent) {

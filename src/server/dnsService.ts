@@ -37,7 +37,7 @@ async function dohQuery(domain: string, type: string): Promise<any[]> {
     const res = await axios.get(`https://cloudflare-dns.com/dns-query`, {
       params: { name: domain, type },
       headers: { Accept: 'application/dns-json' },
-      timeout: 2500,
+      timeout: 2000,
     });
     if (res.data && res.data.Answer && Array.isArray(res.data.Answer)) {
       return res.data.Answer;
@@ -47,7 +47,7 @@ async function dohQuery(domain: string, type: string): Promise<any[]> {
     try {
       const res = await axios.get(`https://dns.google/resolve`, {
         params: { name: domain, type },
-        timeout: 2500,
+        timeout: 2000,
       });
       if (res.data && res.data.Answer && Array.isArray(res.data.Answer)) {
         return res.data.Answer;
@@ -60,13 +60,18 @@ async function dohQuery(domain: string, type: string): Promise<any[]> {
 }
 
 /**
- * Safe promise wrapper that never rejects or leaves unhandled promise rejections.
+ * Safe promise wrapper that never rejects or throws synchronous exceptions.
  */
 async function safeWithTimeout<T>(fn: () => Promise<T>, defaultValue: T, timeoutMs = 2000): Promise<T> {
   let timer: NodeJS.Timeout;
 
-  // Immediately attach .catch to fn() to catch late rejections and prevent UnhandledPromiseRejection in Node
-  const safeFnPromise = fn().catch(() => defaultValue);
+  const safeFnPromise = (async () => {
+    try {
+      return await fn();
+    } catch {
+      return defaultValue;
+    }
+  })();
 
   const timeoutPromise = new Promise<T>((resolve) => {
     timer = setTimeout(() => resolve(defaultValue), timeoutMs);
@@ -102,13 +107,13 @@ export async function resolveDnsRecords(domain: string): Promise<DnsRecords> {
 
   try {
     const [aNative, aaaaNative, cnameNative, mxNative, nsNative, txtNative, soaNative] = await Promise.all([
-      safeWithTimeout(() => dns.resolve4(domain), []),
-      safeWithTimeout(() => dns.resolve6(domain), []),
-      safeWithTimeout(() => dns.resolveCname(domain), []),
-      safeWithTimeout(() => dns.resolveMx(domain), []),
-      safeWithTimeout(() => dns.resolveNs(domain), []),
-      safeWithTimeout(() => dns.resolveTxt(domain), []),
-      safeWithTimeout(() => dns.resolveSoa(domain), null),
+      safeWithTimeout(() => dns.resolve4(domain), [], 1800),
+      safeWithTimeout(() => dns.resolve6(domain), [], 1800),
+      safeWithTimeout(() => dns.resolveCname(domain), [], 1800),
+      safeWithTimeout(() => dns.resolveMx(domain), [], 1800),
+      safeWithTimeout(() => dns.resolveNs(domain), [], 1800),
+      safeWithTimeout(() => dns.resolveTxt(domain), [], 1800),
+      safeWithTimeout(() => dns.resolveSoa(domain), null, 1800),
     ]);
 
     results.a = Array.isArray(aNative) ? aNative : [];
@@ -178,7 +183,7 @@ export async function resolveDnsRecords(domain: string): Promise<DnsRecords> {
   // Try reverse DNS for the primary IPv4 address
   if (results.a.length > 0) {
     try {
-      const hostnames = await safeWithTimeout(() => dns.reverse(results.a[0]), [], 1500);
+      const hostnames = await safeWithTimeout(() => dns.reverse(results.a[0]), [], 1200);
       if (hostnames && hostnames.length > 0) {
         results.reverseDns = hostnames[0];
       }
