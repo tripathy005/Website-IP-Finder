@@ -60,6 +60,29 @@ async function dohQuery(domain: string, type: string): Promise<any[]> {
 }
 
 /**
+ * Safe promise wrapper that never rejects or leaves unhandled promise rejections.
+ */
+async function safeWithTimeout<T>(fn: () => Promise<T>, defaultValue: T, timeoutMs = 2000): Promise<T> {
+  let timer: NodeJS.Timeout;
+
+  // Immediately attach .catch to fn() to catch late rejections and prevent UnhandledPromiseRejection in Node
+  const safeFnPromise = fn().catch(() => defaultValue);
+
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(defaultValue), timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([safeFnPromise, timeoutPromise]);
+    clearTimeout(timer!);
+    return result;
+  } catch {
+    clearTimeout(timer!);
+    return defaultValue;
+  }
+}
+
+/**
  * Perform full DNS resolution for a domain with DoH fallback.
  */
 export async function resolveDnsRecords(domain: string): Promise<DnsRecords> {
@@ -75,17 +98,6 @@ export async function resolveDnsRecords(domain: string): Promise<DnsRecords> {
     soa: null,
     reverseDns: null,
     resolutionTimeMs: 0,
-  };
-
-  const safeWithTimeout = async <T>(fn: () => Promise<T>, defaultValue: T, timeoutMs = 2000): Promise<T> => {
-    try {
-      const timeoutPromise = new Promise<T>((_, reject) =>
-        setTimeout(() => reject(new Error('DNS Timeout')), timeoutMs)
-      );
-      return await Promise.race([fn(), timeoutPromise]);
-    } catch {
-      return defaultValue;
-    }
   };
 
   try {

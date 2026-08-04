@@ -100,19 +100,19 @@ export async function inspectNetworkAndSsl(domain: string, port = 443): Promise<
               protocol: protocol,
             });
           } catch (err: any) {
-            socket.destroy();
+            try { socket.destroy(); } catch {}
             safeResolve({ valid: false, error: err?.message || 'Certificate parsing error' });
           }
         }
       );
 
       socket.on('error', (err) => {
-        socket.destroy();
+        try { socket.destroy(); } catch {}
         safeResolve({ valid: false, error: err?.message || 'TLS connection failed' });
       });
 
       socket.on('timeout', () => {
-        socket.destroy();
+        try { socket.destroy(); } catch {}
         safeResolve({ valid: false, error: 'SSL check timed out' });
       });
     } catch (err: any) {
@@ -163,7 +163,7 @@ export async function inspectNetworkAndSsl(domain: string, port = 443): Promise<
       );
 
       req.on('timeout', () => {
-        req.destroy();
+        try { req.destroy(); } catch {}
       });
 
       req.on('error', () => {
@@ -193,7 +193,7 @@ export async function inspectNetworkAndSsl(domain: string, port = 443): Promise<
           );
 
           httpReq.on('timeout', () => {
-            httpReq.destroy();
+            try { httpReq.destroy(); } catch {}
           });
 
           httpReq.on('error', () => {
@@ -216,9 +216,14 @@ export async function inspectNetworkAndSsl(domain: string, port = 443): Promise<
   const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
 
   const [ssl, httpRes] = await Promise.all([
-    Promise.race([sslPromise, timeoutPromise]).then((res) => res || { valid: false, error: 'SSL check timed out' }),
-    Promise.race([httpPromise, timeoutPromise]).then(
-      (res) => res || { httpsEnabled: false, statusCode: undefined, serverHeader: undefined }
+    Promise.race([sslPromise.catch(() => ({ valid: false, error: 'SSL check error' })), timeoutPromise]).then(
+      (res) => res || { valid: false, error: 'SSL check timed out' }
+    ),
+    Promise.race([
+      httpPromise.catch(() => ({ httpsEnabled: false, statusCode: undefined, serverHeader: undefined, redirectUrl: undefined })),
+      timeoutPromise
+    ]).then(
+      (res) => res || { httpsEnabled: false, statusCode: undefined, serverHeader: undefined, redirectUrl: undefined }
     ),
   ]);
 

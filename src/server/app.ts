@@ -11,11 +11,37 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Primary Comprehensive Lookup Endpoint (Supports POST & GET)
+// Middleware to handle raw string bodies or serverless body issues gracefully
+app.use((req: express.Request, _res: express.Response, next: express.NextFunction) => {
+  if (typeof req.body === 'string' && req.body.trim()) {
+    try {
+      req.body = JSON.parse(req.body);
+    } catch {
+      // Keep as string if parsing fails
+    }
+  }
+  next();
+});
+
+// Primary Comprehensive Lookup Endpoint
 const handleLookup = async (req: express.Request, res: express.Response) => {
   try {
-    const input = req.body?.input || req.query?.input || req.query?.domain || req.query?.q;
+    let input = req.body?.input || req.query?.input || req.query?.domain || req.query?.q;
+
+    // Additional fallback if body is stringified JSON
+    if (!input && typeof req.body === 'string') {
+      try {
+        const parsed = JSON.parse(req.body);
+        input = parsed?.input || parsed?.domain || parsed?.q;
+      } catch {
+        // ignore
+      }
+    }
+
     if (!input || typeof input !== 'string' || !input.trim()) {
+      if (req.path === '/api' || req.path === '/api/') {
+        return res.json({ message: 'Website IP Finder API operational. Send a POST or GET request with an "input" field (e.g. "example.com").' });
+      }
       return res.status(400).json({ error: 'Please provide a valid domain name or IP address.' });
     }
 
@@ -126,8 +152,8 @@ const handleLookup = async (req: express.Request, res: express.Response) => {
   }
 };
 
-app.post(['/api/lookup', '/lookup'], handleLookup);
-app.get(['/api/lookup', '/lookup'], handleLookup);
+app.post(['/api/lookup', '/lookup', '/api'], handleLookup);
+app.get(['/api/lookup', '/lookup', '/api'], handleLookup);
 
 // WHOIS Lookup Endpoint
 app.get(['/api/whois/:domain', '/whois/:domain'], async (req, res) => {
@@ -171,6 +197,17 @@ app.get(['/api/ping/:domain', '/ping/:domain'], async (req, res) => {
   } catch (err: any) {
     return res.status(500).json({ error: String(err?.message || 'Ping failed') });
   }
+});
+
+// Global Express Error Handler Middleware for Serverless Failures
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Global Express Error:', err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  return res.status(500).json({
+    error: String(err?.message || 'An unexpected server error occurred.'),
+  });
 });
 
 export default app;
