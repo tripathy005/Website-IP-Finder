@@ -152,11 +152,11 @@ const handleLookup = async (req: express.Request, res: express.Response) => {
   }
 };
 
-app.post(['/api/lookup', '/lookup', '/api'], handleLookup);
+app.post(['/api/lookup', '/lookup', '/api', '/'], handleLookup);
 app.get(['/api/lookup', '/lookup', '/api'], handleLookup);
 
 // WHOIS Lookup Endpoint
-app.get(['/api/whois/:domain', '/whois/:domain'], async (req, res) => {
+app.get(['/api/whois/:domain', '/whois/:domain', '/:domain'], async (req, res) => {
   try {
     const { domain } = req.params;
     if (!domain) return res.status(400).json({ error: 'Domain required.' });

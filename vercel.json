@@ -1,3 +1,8 @@
 {
-  "version": 2
+  "version": 2,
+  "rewrites": [
+    { "source": "/api/lookup", "destination": "/api/lookup.ts" },
+    { "source": "/api/whois/(.*)", "destination": "/api/whois.ts" },
+    { "source": "/api/(.*)", "destination": "/api/index.ts" }
+  ]
 }
