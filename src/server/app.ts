@@ -1,9 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import { normalizeDomain } from './domainUtils';
-import { resolveDnsRecords } from './dnsService';
-import { getIpGeoDetails } from './ipService';
-import { inspectNetworkAndSsl } from './sslService';
+import { resolveDnsRecords, DnsRecords } from './dnsService';
+import { getIpGeoDetails, IpGeoDetails } from './ipService';
+import { inspectNetworkAndSsl, NetworkHealth } from './sslService';
 import { getWhoisInfo } from './whoisService';
 
 const app = express();
@@ -15,21 +15,36 @@ app.use(express.json());
 const handleLookup = async (req: express.Request, res: express.Response) => {
   try {
     const input = req.body?.input || req.query?.input || req.query?.domain || req.query?.q;
-    if (!input || typeof input !== 'string') {
-      return res.status(400).json({ error: 'Please provide a domain or URL.' });
+    if (!input || typeof input !== 'string' || !input.trim()) {
+      return res.status(400).json({ error: 'Please provide a valid domain name or IP address.' });
     }
 
-    const normalized = normalizeDomain(input);
+    const normalized = normalizeDomain(input.trim());
     if (!normalized.isValid) {
-      return res.status(400).json({ error: normalized.error || 'Invalid domain format.' });
+      return res.status(400).json({ error: normalized.error || 'Invalid domain or IP format.' });
     }
 
     const domain = normalized.domain;
 
-    // Parallel data gather: DNS records, Network/SSL check
+    // Parallel data gather with individual fail-safes
     const [dnsRecords, networkHealth] = await Promise.all([
-      resolveDnsRecords(domain),
-      inspectNetworkAndSsl(domain),
+      resolveDnsRecords(domain).catch((): DnsRecords => ({
+        a: [],
+        aaaa: [],
+        cname: [],
+        mx: [],
+        ns: [],
+        txt: [],
+        soa: null,
+        reverseDns: null,
+        resolutionTimeMs: 0,
+        error: 'DNS resolution unavailable',
+      })),
+      inspectNetworkAndSsl(domain).catch((): NetworkHealth => ({
+        ssl: { valid: false, error: 'SSL check unavailable' },
+        httpsEnabled: false,
+        responseTimeMs: 0,
+      })),
     ]);
 
     // Determine primary target IP for Geolocation
@@ -42,8 +57,24 @@ const handleLookup = async (req: express.Request, res: express.Response) => {
       }
     }
 
-    // Fetch ISP & Geolocation for primary IP
-    const geoDetails = await getIpGeoDetails(targetIp);
+    // Fetch ISP & Geolocation for primary IP with fail-safe
+    const geoDetails: IpGeoDetails = await getIpGeoDetails(targetIp).catch(() => ({
+      ip: targetIp,
+      ipVersion: targetIp.includes(':') ? 'IPv6' : 'IPv4',
+      isp: 'Unknown ISP',
+      org: 'Unknown Organization',
+      asn: 'N/A',
+      networkProvider: 'Unknown',
+      country: 'Unknown',
+      countryCode: 'XX',
+      region: 'Unknown',
+      city: 'Unknown',
+      timezone: 'UTC',
+      latitude: null,
+      longitude: null,
+      isHosting: false,
+      isProxy: false,
+    }));
 
     const responsePayload = {
       domainInfo: {
@@ -56,41 +87,41 @@ const handleLookup = async (req: express.Request, res: express.Response) => {
         status: networkHealth.httpStatusCode ? `Active (${networkHealth.httpStatusCode})` : 'Online',
       },
       ipAddresses: {
-        ipv4: dnsRecords.a,
-        ipv6: dnsRecords.aaaa,
+        ipv4: dnsRecords.a || [],
+        ipv6: dnsRecords.aaaa || [],
         primaryIp: targetIp,
       },
       dnsRecords: dnsRecords,
       ispDetails: {
-        isp: geoDetails.isp,
-        org: geoDetails.org,
-        asn: geoDetails.asn,
-        networkProvider: geoDetails.networkProvider,
+        isp: geoDetails.isp || 'Unknown ISP',
+        org: geoDetails.org || 'Unknown Org',
+        asn: geoDetails.asn || 'N/A',
+        networkProvider: geoDetails.networkProvider || 'Unknown',
       },
       hostingDetails: {
-        country: geoDetails.country,
-        countryCode: geoDetails.countryCode,
-        region: geoDetails.region,
-        city: geoDetails.city,
-        timezone: geoDetails.timezone,
+        country: geoDetails.country || 'Unknown',
+        countryCode: geoDetails.countryCode || 'XX',
+        region: geoDetails.region || 'Unknown',
+        city: geoDetails.city || 'Unknown',
+        timezone: geoDetails.timezone || 'UTC',
         latitude: geoDetails.latitude,
         longitude: geoDetails.longitude,
-        isHosting: geoDetails.isHosting,
-        isProxy: geoDetails.isProxy,
+        isHosting: geoDetails.isHosting || false,
+        isProxy: geoDetails.isProxy || false,
       },
       networkHealth: {
-        responseTimeMs: networkHealth.responseTimeMs,
-        dnsResolutionTimeMs: dnsRecords.resolutionTimeMs,
-        httpsEnabled: networkHealth.httpsEnabled,
+        responseTimeMs: networkHealth.responseTimeMs || 0,
+        dnsResolutionTimeMs: dnsRecords.resolutionTimeMs || 0,
+        httpsEnabled: networkHealth.httpsEnabled || false,
         httpStatusCode: networkHealth.httpStatusCode,
         serverHeader: networkHealth.serverHeader || 'Unknown',
-        ssl: networkHealth.ssl,
+        ssl: networkHealth.ssl || { valid: false },
       },
     };
 
     return res.json(responsePayload);
   } catch (err: any) {
-    console.error('Lookup Error:', err);
+    console.error('Unhandled Lookup Error:', err);
     return res.status(500).json({ error: String(err?.message || 'Failed to complete DNS and IP resolution.') });
   }
 };
@@ -102,12 +133,18 @@ app.get(['/api/lookup', '/lookup'], handleLookup);
 app.get(['/api/whois/:domain', '/whois/:domain'], async (req, res) => {
   try {
     const { domain } = req.params;
+    if (!domain) return res.status(400).json({ error: 'Domain required.' });
     const normalized = normalizeDomain(domain);
     if (!normalized.isValid) {
       return res.status(400).json({ error: 'Invalid domain name.' });
     }
 
-    const whoisData = await getWhoisInfo(normalized.domain);
+    const whoisData = await getWhoisInfo(normalized.domain).catch(() => ({
+      domainName: normalized.domain,
+      registrar: 'Information unavailable',
+      error: 'Failed to retrieve WHOIS records.',
+    }));
+
     return res.json(whoisData);
   } catch (err: any) {
     return res.status(500).json({ error: String(err?.message || 'WHOIS request failed.') });
@@ -118,12 +155,18 @@ app.get(['/api/whois/:domain', '/whois/:domain'], async (req, res) => {
 app.get(['/api/ping/:domain', '/ping/:domain'], async (req, res) => {
   try {
     const { domain } = req.params;
+    if (!domain) return res.status(400).json({ error: 'Domain required.' });
     const normalized = normalizeDomain(domain);
     if (!normalized.isValid) {
       return res.status(400).json({ error: 'Invalid domain' });
     }
 
-    const health = await inspectNetworkAndSsl(normalized.domain);
+    const health = await inspectNetworkAndSsl(normalized.domain).catch(() => ({
+      ssl: { valid: false, error: 'Ping check failed' },
+      httpsEnabled: false,
+      responseTimeMs: 0,
+    }));
+
     return res.json({ domain: normalized.domain, health });
   } catch (err: any) {
     return res.status(500).json({ error: String(err?.message || 'Ping failed') });

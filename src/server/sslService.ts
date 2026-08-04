@@ -30,6 +30,14 @@ export async function inspectNetworkAndSsl(domain: string, port = 443): Promise<
   const startTime = Date.now();
 
   const sslPromise = new Promise<SslInfo>((resolve) => {
+    let resolved = false;
+    const safeResolve = (val: SslInfo) => {
+      if (!resolved) {
+        resolved = true;
+        resolve(val);
+      }
+    };
+
     try {
       const socket = tls.connect(
         {
@@ -40,60 +48,75 @@ export async function inspectNetworkAndSsl(domain: string, port = 443): Promise<
           timeout: 3000,
         },
         () => {
-          const cert = socket.getPeerCertificate() as PeerCertificate;
-          const protocol = socket.getProtocol() || undefined;
-          const isAuthorized = socket.authorized;
+          try {
+            const cert = socket.getPeerCertificate() as PeerCertificate;
+            const protocol = socket.getProtocol() || undefined;
+            const isAuthorized = socket.authorized;
 
-          if (!cert || Object.keys(cert).length === 0) {
+            if (!cert || Object.keys(cert).length === 0) {
+              socket.destroy();
+              return safeResolve({ valid: false, error: 'No SSL certificate found' });
+            }
+
+            const validToDate = cert.valid_to ? new Date(cert.valid_to) : new Date(0);
+            const validFromDate = cert.valid_from ? new Date(cert.valid_from) : new Date(0);
+            const now = new Date();
+            const daysRemaining = Math.max(0, Math.floor((validToDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+
+            const getFirstOrStr = (val: string | string[] | undefined): string => {
+              if (!val) return '';
+              if (Array.isArray(val)) return val[0] || '';
+              return String(val);
+            };
+
+            let issuerStr = 'Unknown Issuer';
+            if (cert.issuer) {
+              if (typeof cert.issuer === 'object') {
+                issuerStr = getFirstOrStr(cert.issuer.O || cert.issuer.CN) || 'Unknown Issuer';
+              } else if (typeof cert.issuer === 'string') {
+                issuerStr = cert.issuer;
+              }
+            }
+
+            let subjectStr = domain;
+            if (cert.subject) {
+              if (typeof cert.subject === 'object') {
+                subjectStr = getFirstOrStr(cert.subject.CN || cert.subject.O) || domain;
+              } else if (typeof cert.subject === 'string') {
+                subjectStr = cert.subject;
+              }
+            }
+
+            const isValid = isAuthorized || (now >= validFromDate && now <= validToDate);
+
             socket.destroy();
-            return resolve({ valid: false, error: 'No SSL certificate found' });
+            safeResolve({
+              valid: isValid,
+              issuer: issuerStr,
+              subject: subjectStr,
+              validFrom: cert.valid_from,
+              validTo: cert.valid_to,
+              daysRemaining: isNaN(daysRemaining) ? 0 : daysRemaining,
+              protocol: protocol,
+            });
+          } catch (err: any) {
+            socket.destroy();
+            safeResolve({ valid: false, error: err?.message || 'Certificate parsing error' });
           }
-
-          const validToDate = new Date(cert.valid_to);
-          const validFromDate = new Date(cert.valid_from);
-          const now = new Date();
-          const daysRemaining = Math.floor((validToDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-
-          const getFirstOrStr = (val: string | string[] | undefined): string => {
-            if (!val) return '';
-            if (Array.isArray(val)) return val[0];
-            return String(val);
-          };
-
-          const rawIssuer =
-            typeof cert.issuer === 'object' ? cert.issuer.O || cert.issuer.CN || 'Unknown Issuer' : cert.issuer;
-          const issuerStr = getFirstOrStr(rawIssuer) || 'Unknown Issuer';
-
-          const rawSubject =
-            typeof cert.subject === 'object' ? cert.subject.CN || cert.subject.O || domain : cert.subject;
-          const subjectStr = getFirstOrStr(rawSubject) || domain;
-
-          const isValid = isAuthorized || (now >= validFromDate && now <= validToDate);
-
-          socket.destroy();
-          resolve({
-            valid: isValid,
-            issuer: issuerStr,
-            subject: subjectStr,
-            validFrom: cert.valid_from,
-            validTo: cert.valid_to,
-            daysRemaining: daysRemaining > 0 ? daysRemaining : 0,
-            protocol: protocol,
-          });
         }
       );
 
       socket.on('error', (err) => {
         socket.destroy();
-        resolve({ valid: false, error: err.message || 'TLS connection failed' });
+        safeResolve({ valid: false, error: err?.message || 'TLS connection failed' });
       });
 
       socket.on('timeout', () => {
         socket.destroy();
-        resolve({ valid: false, error: 'SSL check timed out' });
+        safeResolve({ valid: false, error: 'SSL check timed out' });
       });
     } catch (err: any) {
-      resolve({ valid: false, error: err.message || 'SSL verification error' });
+      safeResolve({ valid: false, error: err?.message || 'SSL verification error' });
     }
   });
 
@@ -103,6 +126,14 @@ export async function inspectNetworkAndSsl(domain: string, port = 443): Promise<
     serverHeader?: string;
     redirectUrl?: string;
   }>((resolve) => {
+    let resolved = false;
+    const safeResolve = (val: { httpsEnabled: boolean; statusCode?: number; serverHeader?: string; redirectUrl?: string }) => {
+      if (!resolved) {
+        resolved = true;
+        resolve(val);
+      }
+    };
+
     try {
       const req = https.get(
         `https://${domain}`,
@@ -111,18 +142,23 @@ export async function inspectNetworkAndSsl(domain: string, port = 443): Promise<
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) WebsiteIPFinder/1.0' },
         },
         (res) => {
-          const rawServer = res.headers['server'];
-          const serverHeader = Array.isArray(rawServer) ? rawServer[0] : rawServer;
-          const rawLoc = res.headers['location'];
-          const redirectUrl = Array.isArray(rawLoc) ? rawLoc[0] : rawLoc;
+          try {
+            const rawServer = res.headers['server'];
+            const serverHeader = Array.isArray(rawServer) ? rawServer[0] : rawServer;
+            const rawLoc = res.headers['location'];
+            const redirectUrl = Array.isArray(rawLoc) ? rawLoc[0] : rawLoc;
 
-          res.resume();
-          resolve({
-            httpsEnabled: true,
-            statusCode: res.statusCode,
-            serverHeader,
-            redirectUrl,
-          });
+            res.resume();
+            safeResolve({
+              httpsEnabled: true,
+              statusCode: res.statusCode,
+              serverHeader,
+              redirectUrl,
+            });
+          } catch {
+            res.resume();
+            safeResolve({ httpsEnabled: true, statusCode: res.statusCode });
+          }
         }
       );
 
@@ -140,14 +176,19 @@ export async function inspectNetworkAndSsl(domain: string, port = 443): Promise<
               headers: { 'User-Agent': 'WebsiteIPFinder/1.0' },
             },
             (res) => {
-              const rawServer = res.headers['server'];
-              const serverHeader = Array.isArray(rawServer) ? rawServer[0] : rawServer;
-              res.resume();
-              resolve({
-                httpsEnabled: false,
-                statusCode: res.statusCode,
-                serverHeader,
-              });
+              try {
+                const rawServer = res.headers['server'];
+                const serverHeader = Array.isArray(rawServer) ? rawServer[0] : rawServer;
+                res.resume();
+                safeResolve({
+                  httpsEnabled: false,
+                  statusCode: res.statusCode,
+                  serverHeader,
+                });
+              } catch {
+                res.resume();
+                safeResolve({ httpsEnabled: false, statusCode: res.statusCode });
+              }
             }
           );
 
@@ -156,18 +197,18 @@ export async function inspectNetworkAndSsl(domain: string, port = 443): Promise<
           });
 
           httpReq.on('error', () => {
-            resolve({ httpsEnabled: false });
+            safeResolve({ httpsEnabled: false });
           });
 
           httpReq.end();
         } catch {
-          resolve({ httpsEnabled: false });
+          safeResolve({ httpsEnabled: false });
         }
       });
 
       req.end();
     } catch {
-      resolve({ httpsEnabled: false });
+      safeResolve({ httpsEnabled: false });
     }
   });
 

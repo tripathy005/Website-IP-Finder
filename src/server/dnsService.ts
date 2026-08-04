@@ -30,7 +30,7 @@ export interface DnsRecords {
 }
 
 /**
- * Cloudflare DoH query fallback for environments where UDP port 53 is restricted (e.g. Vercel Serverless).
+ * Cloudflare / Google DoH query fallback for environments where UDP port 53 is restricted (e.g. Vercel Serverless).
  */
 async function dohQuery(domain: string, type: string): Promise<any[]> {
   try {
@@ -53,7 +53,7 @@ async function dohQuery(domain: string, type: string): Promise<any[]> {
         return res.data.Answer;
       }
     } catch {
-      // return empty
+      // return empty array on failure
     }
   }
   return [];
@@ -88,67 +88,79 @@ export async function resolveDnsRecords(domain: string): Promise<DnsRecords> {
     }
   };
 
-  const [aNative, aaaaNative, cnameNative, mxNative, nsNative, txtNative, soaNative] = await Promise.all([
-    safeWithTimeout(() => dns.resolve4(domain), []),
-    safeWithTimeout(() => dns.resolve6(domain), []),
-    safeWithTimeout(() => dns.resolveCname(domain), []),
-    safeWithTimeout(() => dns.resolveMx(domain), []),
-    safeWithTimeout(() => dns.resolveNs(domain), []),
-    safeWithTimeout(() => dns.resolveTxt(domain), []),
-    safeWithTimeout(() => dns.resolveSoa(domain), null),
-  ]);
+  try {
+    const [aNative, aaaaNative, cnameNative, mxNative, nsNative, txtNative, soaNative] = await Promise.all([
+      safeWithTimeout(() => dns.resolve4(domain), []),
+      safeWithTimeout(() => dns.resolve6(domain), []),
+      safeWithTimeout(() => dns.resolveCname(domain), []),
+      safeWithTimeout(() => dns.resolveMx(domain), []),
+      safeWithTimeout(() => dns.resolveNs(domain), []),
+      safeWithTimeout(() => dns.resolveTxt(domain), []),
+      safeWithTimeout(() => dns.resolveSoa(domain), null),
+    ]);
 
-  results.a = aNative;
-  results.aaaa = aaaaNative;
-  results.cname = cnameNative;
-  results.mx = mxNative;
-  results.ns = nsNative;
-  results.txt = txtNative;
-  results.soa = soaNative;
-
-  // DoH Fallback for missing A or AAAA or NS records (common on Serverless environments)
-  if (results.a.length === 0) {
-    const dohA = await dohQuery(domain, 'A');
-    results.a = dohA.filter((rec: any) => rec.type === 1).map((rec: any) => rec.data);
+    results.a = Array.isArray(aNative) ? aNative : [];
+    results.aaaa = Array.isArray(aaaaNative) ? aaaaNative : [];
+    results.cname = Array.isArray(cnameNative) ? cnameNative : [];
+    results.mx = Array.isArray(mxNative) ? mxNative : [];
+    results.ns = Array.isArray(nsNative) ? nsNative : [];
+    results.txt = Array.isArray(txtNative) ? txtNative : [];
+    results.soa = soaNative;
+  } catch {
+    // Native DNS lookup completely unsupported on platform; rely on DoH below
   }
 
-  if (results.aaaa.length === 0) {
-    const dohAAAA = await dohQuery(domain, 'AAAA');
-    results.aaaa = dohAAAA.filter((rec: any) => rec.type === 28).map((rec: any) => rec.data);
-  }
+  // DoH Fallbacks for Serverless Environments
+  try {
+    if (results.a.length === 0) {
+      const dohA = await dohQuery(domain, 'A');
+      results.a = dohA
+        .filter((rec: any) => rec && rec.type === 1 && rec.data)
+        .map((rec: any) => String(rec.data));
+    }
 
-  if (results.cname.length === 0) {
-    const dohCname = await dohQuery(domain, 'CNAME');
-    results.cname = dohCname
-      .filter((rec: any) => rec.type === 5)
-      .map((rec: any) => rec.data.replace(/\.$/, ''));
-  }
+    if (results.aaaa.length === 0) {
+      const dohAAAA = await dohQuery(domain, 'AAAA');
+      results.aaaa = dohAAAA
+        .filter((rec: any) => rec && rec.type === 28 && rec.data)
+        .map((rec: any) => String(rec.data));
+    }
 
-  if (results.ns.length === 0) {
-    const dohNs = await dohQuery(domain, 'NS');
-    results.ns = dohNs
-      .filter((rec: any) => rec.type === 2)
-      .map((rec: any) => rec.data.replace(/\.$/, ''));
-  }
+    if (results.cname.length === 0) {
+      const dohCname = await dohQuery(domain, 'CNAME');
+      results.cname = dohCname
+        .filter((rec: any) => rec && rec.type === 5 && rec.data)
+        .map((rec: any) => String(rec.data).replace(/\.$/, ''));
+    }
 
-  if (results.mx.length === 0) {
-    const dohMx = await dohQuery(domain, 'MX');
-    results.mx = dohMx
-      .filter((rec: any) => rec.type === 15)
-      .map((rec: any) => {
-        const parts = rec.data.split(' ');
-        return {
-          priority: parseInt(parts[0] || '10', 10),
-          exchange: (parts[1] || '').replace(/\.$/, ''),
-        };
-      });
-  }
+    if (results.ns.length === 0) {
+      const dohNs = await dohQuery(domain, 'NS');
+      results.ns = dohNs
+        .filter((rec: any) => rec && rec.type === 2 && rec.data)
+        .map((rec: any) => String(rec.data).replace(/\.$/, ''));
+    }
 
-  if (results.txt.length === 0) {
-    const dohTxt = await dohQuery(domain, 'TXT');
-    results.txt = dohTxt
-      .filter((rec: any) => rec.type === 16)
-      .map((rec: any) => [rec.data.replace(/^"|"$/g, '')]);
+    if (results.mx.length === 0) {
+      const dohMx = await dohQuery(domain, 'MX');
+      results.mx = dohMx
+        .filter((rec: any) => rec && rec.type === 15 && rec.data)
+        .map((rec: any) => {
+          const parts = String(rec.data).split(' ');
+          return {
+            priority: parseInt(parts[0] || '10', 10),
+            exchange: (parts[1] || '').replace(/\.$/, ''),
+          };
+        });
+    }
+
+    if (results.txt.length === 0) {
+      const dohTxt = await dohQuery(domain, 'TXT');
+      results.txt = dohTxt
+        .filter((rec: any) => rec && rec.type === 16 && rec.data)
+        .map((rec: any) => [String(rec.data).replace(/^"|"$/g, '')]);
+    }
+  } catch {
+    // Fail-safe catch for DoH parsing
   }
 
   // Try reverse DNS for the primary IPv4 address
