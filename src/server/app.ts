@@ -1,10 +1,10 @@
 import express from 'express';
 import cors from 'cors';
-import { normalizeDomain } from './domainUtils.ts';
-import { resolveDnsRecords } from './dnsService.ts';
-import { getIpGeoDetails } from './ipService.ts';
-import { inspectNetworkAndSsl } from './sslService.ts';
-import { getWhoisInfo } from './whoisService.ts';
+import { normalizeDomain } from './domainUtils';
+import { resolveDnsRecords } from './dnsService';
+import { getIpGeoDetails } from './ipService';
+import { inspectNetworkAndSsl } from './sslService';
+import { getWhoisInfo } from './whoisService';
 
 const app = express();
 
@@ -95,11 +95,11 @@ const handleLookup = async (req: express.Request, res: express.Response) => {
   }
 };
 
-app.post('/api/lookup', handleLookup);
-app.get('/api/lookup', handleLookup);
+app.post(['/api/lookup', '/lookup'], handleLookup);
+app.get(['/api/lookup', '/lookup'], handleLookup);
 
 // WHOIS Lookup Endpoint
-app.get('/api/whois/:domain', async (req, res) => {
+app.get(['/api/whois/:domain', '/whois/:domain'], async (req, res) => {
   try {
     const { domain } = req.params;
     const normalized = normalizeDomain(domain);
@@ -115,7 +115,7 @@ app.get('/api/whois/:domain', async (req, res) => {
 });
 
 // Health / Ping Endpoint
-app.get('/api/ping/:domain', async (req, res) => {
+app.get(['/api/ping/:domain', '/ping/:domain'], async (req, res) => {
   try {
     const { domain } = req.params;
     const normalized = normalizeDomain(domain);
